@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Spring Boot Application
+  mng-web:
+    image: ${REGISTRY:-localhost:5000}/cms/casino-mng:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Spring profile
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      JAVA_TOOL_OPTIONS: >-
+        -Dspring.datasource.url='jdbc:postgresql://192.168.63.101:5432/casino'
+        -Dspring.datasource.username='postgres'
+        -Dspring.datasource.password='T=Fu_)qRE74dP3f1x,XeM#tozK36QKKu'
+        -Dcom.alliance.casino.app.schema.init=${SCHEMA_INIT:-false}
+        -Dcom.alliance.casino.jwt.enable=true
+        -Dlogging.file.path='./logs'
+      JAVA_OPTS: >-
+        -XX:CRaCCheckpointTo=/app/checkpoint
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=75.0
+        -XX:InitialRAMPercentage=50.0
+      # Python report database connection
+      DB_HOST: 192.168.63.101
+      DB_PORT: 5432
+      DB_NAME: casino
+      DB_USER: postgres
+      DB_PASSWORD: 'T=Fu_)qRE74dP3f1x,XeM#tozK36QKKu'
+      # Python report output directory
+      REPORT_OUTPUT_DIR: /app/reports/
+      # Python executable path (mounted from host)
+      REPORT_PYTHON_EXECUTABLE: /usr/local/bin/python3.10
+      # Timezone
+      TZ: Asia/Taipei
+    command: >
+      sh -c "
+        java -XX:ArchiveClassesAtExit=app-cds.jsa -jar ${APP_JAR}
+        java -jar -XX:SharedArchiveFile=app-cds.jsa ${APP_JAR}
+      "
+    volumes:
+      - /root/casino-images:/app/casino-images
+      - /root/logs/mng:/app/logs
+      - /root/checkpoint:/app/checkpoint  # CRaC checkpoint directory
+      # Mount host reports Python 報表生成對應的目錄
+      - /root/reports:/app/reports
+      # Mount Python report scripts (這樣設定報表.py修改後不需重新 build，更新檔案就好)
+      - /root/paper-report-feature:/app/paper-report-feature
+      # Mount host Python 3.10 (報表python在機器上的執行檔)
+      - /usr/local/bin/python3.10:/usr/local/bin/python3.10:ro
+      - /usr/local/lib/python3.10:/usr/local/lib/python3.10:ro
+    ports:
+      - "18080:18080"
+    networks:
+      - casino-network
+    deploy:
+      mode: replicated
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 2s
+        failure_action: rollback
+        #        確保新容器啟動後才停止舊容器，對於 replica 為 1 的服務特別重要。
+        order: start-first
+      #      配置合理的更新策略避免服務中斷：
+      rollback_config:
+        parallelism: 1
+        delay: 2s
+      restart_policy:
+        condition: on-failure
+        delay: 1s
+        max_attempts: 3
+        window: 20s
+      placement:
+        constraints:
+          - node.hostname == CMS-Sit-02
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 2048M
+        reservations:
+          cpus: '2'
+          memory: 512M
+    logging:
+      options:
+        max-size: "500m"
+        max-file: "3"
+
+networks:
+  casino-network:
+    driver: overlay
+    attachable: true
